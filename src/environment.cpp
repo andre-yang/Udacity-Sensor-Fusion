@@ -76,6 +76,7 @@ void simpleHighway(pcl::visualization::PCLVisualizer::Ptr& viewer)
     delete lidar;
 }
 
+// single frame call
 void cityBlock(pcl::visualization::PCLVisualizer::Ptr& viewer)
 {
     // ----------------------------------------------------
@@ -90,6 +91,7 @@ void cityBlock(pcl::visualization::PCLVisualizer::Ptr& viewer)
     cityBlock(viewer, pointProcessorI, inputCloud);
 }
 
+// allow both stream and single frame call 
 void cityBlock(pcl::visualization::PCLVisualizer::Ptr& viewer, ProcessPointClouds<pcl::PointXYZI>* pointProcessorI, const pcl::PointCloud<pcl::PointXYZI>::Ptr& inputCloud)
 {  
     // downsampling pcl

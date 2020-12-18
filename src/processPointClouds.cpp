@@ -4,33 +4,71 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/filters/crop_box.h>
 
+template<class PointT>
+struct Node
+{
+	PointT &point;
+	int id;
+	Node* left;
+	Node* right;
+
+	Node(PointT p, int setId)
+	:	point(p), id(setId), left(NULL), right(NULL)
+	{}
+};
 
 
-template <PointT>
+template <class PointT>
 class KdTree
 {
-	Node* root;
+	Node<PointT>* root;
 
 public:
 	KdTree()
 	: root(NULL)
 	{}
 
-	void insert(PointT point, int id)
+    void buildTree(typename pcl::PointCloud<PointT>::Ptr & cloud) 
+    {
+        for (uint32_t id = 0; id < cloud->size(); id++) {
+            this->insert(cloud->points[id], id);
+        }
+    }
+
+	void insert(PointT &point, int id)
 	{
 		if (this->root == NULL)
 		{
-			root = new Node(point, id);
+			root = new Node<PointT>(point, id);
 		} else {
-			Node *node (new Node(point, id));
+			Node<PointT> *node (new Node<PointT>(point, id));
 			insertKd(root, node, 0);
 		}
 	}
 
-	void insertKd(Node *&curr_node, Node *&node, int depth) {
-		int axis_compare = depth % 3;
+    bool compare_axis_value(PointT & p1, PointT & p2, int axis_compare) {
+        bool comp = false;
+        switch (axis_compare) {
+            case 0:
+                comp = p1.x < p2.x;
+            break;
+            case 1:
+                comp = p1.y < p2.y;
+            break;
+            case 2:
+                comp = p1.z < p2.z;
+            break;
+            default:
+                comp = false;
+        }
+        return comp;
+    }
 
-		if (node->point[axis_compare] < curr_node->point[axis_compare]) {
+	void insertKd(Node<PointT> *&curr_node, Node<PointT> *&node, int depth) {
+		int axis_compare = depth % 3;
+        bool comp = compare_axis_value(node->point, curr_node->point, axis_compare);
+
+		if (comp) {
 			if (curr_node->left == NULL) {
 				curr_node->left = node;
 			} else {
@@ -46,38 +84,57 @@ public:
 	}
 
 	// return a list of point ids in the tree that are within distance of target
-	std::vector<int> search(PointT target, float distanceTol)
+	std::vector<int> search(PointT &target, float distanceTol)
 	{
 		std::vector<int> ids;
 		search_recur(ids, root, target, distanceTol, 0);
 		return ids;
 	}
 	
-	void search_recur(std::vector<int> &ids, Node *&curr_node, std::vector<float> &target, float distanceTol, int depth) {
+	void search_recur(std::vector<int> &ids, Node<PointT> *&curr_node, PointT &target, float distanceTol, int depth) {
 		
-		if ( (curr_node->point[0] <= (target[0] + distanceTol) ) &&
-			 (curr_node->point[0] >= (target[0] - distanceTol) ) &&
-			 (curr_node->point[1] <= (target[1] + distanceTol) ) &&
-			 (curr_node->point[1] >= (target[1] - distanceTol) ) && 
-             (curr_node->point[2] <= (target[2] + distanceTol) ) &&
-			 (curr_node->point[2] >= (target[2] - distanceTol) ))
+		if ( (curr_node->point.x <= (target.x + distanceTol) ) &&
+			 (curr_node->point.x >= (target.x - distanceTol) ) &&
+			 (curr_node->point.y <= (target.y + distanceTol) ) &&
+			 (curr_node->point.y >= (target.y - distanceTol) ) && 
+             (curr_node->point.z <= (target.z + distanceTol) ) &&
+			 (curr_node->point.z >= (target.z - distanceTol) ))
 		{
-			if ( pow(pow(curr_node->point[0]-target[0],2) + 
-                     pow(curr_node->point[1]-target[1],2) + 
-                     pow(curr_node->point[2]-target[2],2), 0.5) <= distanceTol ) {
+			if ( pow(pow(curr_node->point.x - target.x, 2) + 
+                     pow(curr_node->point.y - target.y, 2) + 
+                     pow(curr_node->point.z - target.z, 2), 0.5) <= distanceTol ) {
 				ids.push_back(curr_node->id);
 			}
 		}
 
 		// search left if the bounding box is within the left side of the splitting line, and vice versa
 		int axis_compare = depth % 3;
-		if ((target[axis_compare] - distanceTol) < curr_node->point[axis_compare]) {
+        float target_axis_val = 0;
+        float curr_axis_val = 0;
+        switch (axis_compare) {
+            case 0:
+                target_axis_val = target.x;
+                curr_axis_val = curr_node->point.x;
+            break;
+            case 1:
+                target_axis_val = target.y;
+                curr_axis_val = curr_node->point.y;
+            break;
+            case 2:
+                target_axis_val = target.z;
+                curr_axis_val = curr_node->point.z;
+            break;
+            default:
+                return;
+        }
+
+		if ((target_axis_val - distanceTol) < curr_axis_val) {
 			if (curr_node->left != NULL) {
 				search_recur(ids, curr_node->left, target, distanceTol, depth+1);	
 			}
 		} 
 		
-		if ((target[axis_compare] + distanceTol) > curr_node->point[axis_compare]) {
+		if ((target_axis_val + distanceTol) > curr_axis_val) {
 			if (curr_node->right != NULL) {
 				search_recur(ids, curr_node->right, target, distanceTol, depth+1);	
 			}
@@ -273,9 +330,10 @@ std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::C
     return clusters;
 }
 
-// Proximity(point,cluster):
-void proximity(const std::vector<std::vector<float>>& points, const std::vector<float> &point, std::vector<std::vector<int>> & clusters, std::vector<int> &new_cluster, std::set<std::vector<float>> & is_point_processed, KdTree* tree, float distanceTol)
+template<typename PointT>
+void proximity(const std::vector<PointT>& points, const std::vector<float> &point, std::vector<std::vector<int>> & clusters, std::vector<int> &new_cluster, std::set<std::vector<float>> & is_point_processed, KdTree<PointT>* tree, float distanceTol)
 {
+    /*
     //mark point as processed
 	auto it = find(points.begin(), points.end(), point);
 	int idx = 0;
@@ -298,17 +356,18 @@ void proximity(const std::vector<std::vector<float>>& points, const std::vector<
 			proximity(points, points[nearby_point_idx], clusters, new_cluster, is_point_processed, tree, distanceTol);
 		}
 	}
-
+    */
 }
 
-std::vector<std::vector<int>> euclideanCluster(const std::vector<std::vector<float>>& points, KdTree* tree, float distanceTol)
+template<typename PointT>
+std::vector<std::vector<int>> euclideanCluster(typename pcl::PointCloud<PointT>::Ptr cloud, KdTree<PointT>* tree, float distanceTol)
 {
 
-	// TODO: Fill out this function to return list of indices for each cluster
-
+	// return list of indices for each cluster
 	std::vector<std::vector<int>> clusters;
-	std::set<std::vector<float>> is_point_processed;
+	std::set<PointT> is_point_processed;
 
+    /*
 	for (auto point : points) {
 		if (is_point_processed.find(point) == is_point_processed.end()) {
 			std::vector<int> new_cluster;
@@ -316,7 +375,7 @@ std::vector<std::vector<int>> euclideanCluster(const std::vector<std::vector<flo
 			clusters.push_back(new_cluster);
 		}
 	}
- 
+    */
 	return clusters;
 }
 
@@ -328,12 +387,15 @@ std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::C
 
     std::vector<typename pcl::PointCloud<PointT>::Ptr> clusters;
 
-    // TODO:: Fill in the function to perform euclidean clustering to group detected obstacles
-    typename pcl::search::KdTree<PointT>::Ptr tree(new typename pcl::search::KdTree<PointT>);
-    tree->setInputCloud(cloud);
+    // perform euclidean clustering to group detected obstacles
+    //typename pcl::search::KdTree<PointT>::Ptr tree(new typename pcl::search::KdTree<PointT>);
+    //tree->setInputCloud(cloud);
+    KdTree<PointT> tree;
+    tree.buildTree(cloud);
 
     std::vector<pcl::PointIndices> cluster_indices;
     
+    /*
     pcl::EuclideanClusterExtraction<PointT> ec;
     ec.setClusterTolerance(clusterTolerance);
     ec.setMinClusterSize(minSize);
@@ -341,7 +403,8 @@ std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::C
     ec.setSearchMethod(tree);
     ec.setInputCloud(cloud);
     ec.extract(cluster_indices);
-    euclideanCluster();
+    //*/
+    euclideanCluster(cloud, &tree, clusterTolerance);
 
     for (pcl::PointIndices getIndices: cluster_indices) {
         typename pcl::PointCloud<PointT>::Ptr cloud_cluster(new typename pcl::PointCloud<PointT>);
