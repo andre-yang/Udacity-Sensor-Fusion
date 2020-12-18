@@ -3,6 +3,9 @@
 #include "processPointClouds.h"
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/filters/crop_box.h>
+#include <unordered_set>
+#include <cmath>
+#include <pcl/filters/random_sample.h>
 
 template<class PointT>
 struct Node
@@ -260,6 +263,74 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
 
     std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> segResult = SeparateClouds(inliers,cloud);
     return segResult;
+}
+
+template<typename PointT>
+std::unordered_set<int> RansacPlane(typename pcl::PointCloud<PointT>::Ptr cloud, int maxIterations, float distanceTol)
+{
+	std::unordered_set<int> inliersResult;
+	srand(time(NULL));
+	
+	// TODO: Fill in this function
+
+	pcl::RandomSample<PointT> sample;
+	sample.setInputCloud(cloud);
+	sample.setSample(2);
+	int cloud_size = cloud->points.size();
+	int max_inlier_count = 0;
+
+	// For max iterations 
+	for (int i = 0; i < maxIterations; i++) {
+		
+		// Randomly sample subset and fit line
+		int p1_idx = rand() % cloud_size;
+
+		int p2_idx = rand() % cloud_size;
+		while (p2_idx == p1_idx) {
+			p2_idx = rand() % cloud_size;
+		}
+
+		int p3_idx = rand() % cloud_size;
+		while (p3_idx == p1_idx || p3_idx == p2_idx) {
+			p3_idx = rand() % cloud_size;
+		}
+		PointT &p1 = cloud->points[p1_idx];
+		PointT &p2 = cloud->points[p2_idx];
+		PointT &p3 = cloud->points[p3_idx];
+
+		float A = (p2.y - p1.y)*(p3.z-p1.z) - (p2.z-p1.z)*(p3.y-p1.y);
+		float B = (p2.z-p1.z)*(p3.x-p1.x) - (p2.x - p1.x)*(p3.z - p1.z);
+		float C = (p2.x - p1.x)*(p3.y - p1.y) - (p2.y - p1.y)*(p3.x - p1.x);
+		float D = -(A*p1.x + B*p2.y + C*p1.z);
+		
+		// Measure distance between every point and fitted line
+		// If distance is smaller than threshold count it as inlier
+		int inlier_count = 0;
+		std::vector<int> inliers_list;
+		for (int j = 0; j < cloud_size; j++) {
+			if ((j == p1_idx) || (j == p2_idx)) {
+				continue;
+			}
+			PointT &p = cloud->points[j];
+			float d = fabs(A*p.x + B*p.y + C*p.z + D) / sqrt(pow(A,2) + pow(B,2) + pow(C,2));
+			if (d < distanceTol) {
+				inlier_count += 1;
+				inliers_list.push_back(j);
+			}
+		}
+		
+		if (inlier_count > max_inlier_count) {
+			max_inlier_count = inlier_count;
+			inliersResult.clear();
+			for (int idx : inliers_list) {
+				inliersResult.insert(idx);
+			}
+		}
+
+		// Return indicies of inliers from fitted line with most inliers
+	}
+	return inliersResult;
+
 }
 
 template<typename PointT>
