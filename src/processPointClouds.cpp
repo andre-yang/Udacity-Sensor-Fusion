@@ -10,7 +10,7 @@
 template<class PointT>
 struct Node
 {
-	PointT &point;
+	const PointT point;
 	int id;
 	Node* left;
 	Node* right;
@@ -31,14 +31,14 @@ public:
 	: root(NULL)
 	{}
 
-    void buildTree(typename pcl::PointCloud<PointT>::Ptr & cloud) 
+    void buildTree(typename pcl::PointCloud<PointT>::Ptr cloud) 
     {
         for (uint32_t id = 0; id < cloud->size(); id++) {
             this->insert(cloud->points[id], id);
         }
     }
 
-	void insert(PointT &point, int id)
+	void insert(const PointT point, const int id)
 	{
 		if (this->root == NULL)
 		{
@@ -49,26 +49,33 @@ public:
 		}
 	}
 
-    bool compare_axis_value(PointT & p1, PointT & p2, int axis_compare) {
+    bool compare_axis_value(const PointT & p1, const PointT & p2, const int axis_compare) {
         bool comp = false;
         switch (axis_compare) {
             case 0:
                 comp = p1.x < p2.x;
-            break;
+                break;
             case 1:
                 comp = p1.y < p2.y;
-            break;
+                break;
             case 2:
                 comp = p1.z < p2.z;
-            break;
+                break; 
             default:
                 comp = false;
         }
         return comp;
     }
 
-	void insertKd(Node<PointT> *&curr_node, Node<PointT> *&node, int depth) {
+	void insertKd(Node<PointT> *&curr_node, Node<PointT> *&node, const int depth) {
 		int axis_compare = depth % 3;
+        /*//debug code that showed using reference for point in Node doesn't reference the point object correctly
+          // all values are really small
+        std::cout << "axis:" << axis_compare << ", "
+                  << "curr_node:" << curr_node->point.x << ", "
+                                  << curr_node->point.y << ", "
+                                  << curr_node->point.z << std::endl;
+        //*/
         bool comp = compare_axis_value(node->point, curr_node->point, axis_compare);
 
 		if (comp) {
@@ -87,14 +94,14 @@ public:
 	}
 
 	// return a list of point ids in the tree that are within distance of target
-	std::vector<int> search(const PointT &target, float distanceTol)
+	std::vector<int> search(const PointT &target, const float distanceTol)
 	{
 		std::vector<int> ids;
 		search_recur(ids, root, target, distanceTol, 0);
 		return ids;
 	}
 	
-	void search_recur(std::vector<int> &ids, Node<PointT> *&curr_node, const PointT &target, float distanceTol, int depth) {
+	void search_recur(std::vector<int> &ids, Node<PointT> *&curr_node, const PointT &target, const float distanceTol, const int depth) {
 		
 		if ( (curr_node->point.x <= (target.x + distanceTol) ) &&
 			 (curr_node->point.x >= (target.x - distanceTol) ) &&
@@ -391,7 +398,7 @@ std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::C
 }
 
 template<typename PointT>
-void proximity(typename pcl::PointCloud<PointT>::Ptr cloud, const PointT &point, int point_idx, std::vector<pcl::PointIndices::Ptr> & clusters, 
+void ProcessPointClouds<PointT>::proximity(typename pcl::PointCloud<PointT>::Ptr cloud, const PointT &point, const int point_idx, std::vector<pcl::PointIndices::Ptr> & clusters, 
     pcl::PointIndices::Ptr new_cluster, std::vector<bool> & is_point_processed, KdTree<PointT>* tree, float distanceTol)
 {
     //mark point as processed
@@ -402,7 +409,7 @@ void proximity(typename pcl::PointCloud<PointT>::Ptr cloud, const PointT &point,
 
     //nearby points = tree(point)
 	std::vector<int> nearby_points_idxs = tree->search(point, distanceTol);
-
+    //std::cout << "nearby_points_idxs:" << nearby_points_idxs.size() << std::endl; // this print showed that there were zero points nearby with reference so something must be wrong with tree search method
     //Iterate through each nearby point
 	for (int nearby_point_idx : nearby_points_idxs) {
         //If point has not been processed
@@ -414,18 +421,20 @@ void proximity(typename pcl::PointCloud<PointT>::Ptr cloud, const PointT &point,
 }
 
 template<typename PointT>
-std::vector<pcl::PointIndices::Ptr> *euclideanCluster(typename pcl::PointCloud<PointT>::Ptr cloud, KdTree<PointT>* tree, float distanceTol)
+std::vector<pcl::PointIndices::Ptr> ProcessPointClouds<PointT>::euclideanCluster(typename pcl::PointCloud<PointT>::Ptr cloud, KdTree<PointT>* tree, float distanceTol, int minSize, int maxSize)
 {
-
 	// return list of indices for each cluster
-	std::vector<pcl::PointIndices::Ptr> *clusters(new std::vector<pcl::PointIndices::Ptr>);
+	std::vector<pcl::PointIndices::Ptr> clusters;
 	std::vector<bool> is_point_processed(cloud->points.size(), false);
 
-    for (uint32_t i = 0; i < cloud->size(); i++) {
+    for (uint32_t i = 0; i < cloud->points.size(); i++) {
         if (is_point_processed[i] == false) {
             pcl::PointIndices::Ptr new_cluster(new pcl::PointIndices());
-            proximity<PointT>(cloud, cloud->points[i], i, *clusters, new_cluster, is_point_processed, tree, distanceTol);
-            clusters->push_back(new_cluster);
+            proximity(cloud, cloud->points[i], i, clusters, new_cluster, is_point_processed, tree, distanceTol);
+            
+            if ((new_cluster->indices.size() > minSize) && (new_cluster->indices.size() < maxSize)) {
+                clusters.push_back(new_cluster);
+            }
         }
     }
 	return clusters;
@@ -443,20 +452,17 @@ std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::C
     KdTree<PointT> tree;
     tree.buildTree(cloud);
 
-    //std::vector<pcl::PointIndices> cluster_indices;
-    std::vector<pcl::PointIndices::Ptr> cluster_indices = *euclideanCluster<PointT>(cloud, &tree, clusterTolerance);
+    std::vector<pcl::PointIndices::Ptr> cluster_indices = this->euclideanCluster(cloud, &tree, clusterTolerance, minSize, maxSize);
 
     for (pcl::PointIndices::Ptr getIndices: cluster_indices) {
-        if ((getIndices->indices.size() > minSize) && (getIndices->indices.size() < maxSize)) {
-            typename pcl::PointCloud<PointT>::Ptr cloud_cluster(new typename pcl::PointCloud<PointT>);
-            for (int index : getIndices->indices) {
-                cloud_cluster->points.push_back(cloud->points[index]);
-            }
-            cloud_cluster->width = cloud_cluster->points.size();
-            cloud_cluster->height = 1;
-            cloud_cluster->is_dense = true;
-            clusters.push_back(cloud_cluster);
+        typename pcl::PointCloud<PointT>::Ptr cloud_cluster(new typename pcl::PointCloud<PointT>);
+        for (int index : getIndices->indices) {
+            cloud_cluster->points.push_back(cloud->points[index]);
         }
+        cloud_cluster->width = cloud_cluster->points.size();
+        cloud_cluster->height = 1;
+        cloud_cluster->is_dense = true;
+        clusters.push_back(cloud_cluster);
     }
 
     auto endTime = std::chrono::steady_clock::now();

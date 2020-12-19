@@ -142,7 +142,7 @@ void cityBlockCustom(pcl::visualization::PCLVisualizer::Ptr& viewer, ProcessPoin
     //renderPointCloud(viewer, segmentCloud.second, "obstCloud", Color(1,0,0)); // keep for rendering obstacles for reference
 
     // cluster and draw the clusters and their bounding boxes
-    std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> cloudClusters = ppc.ClusteringMy(segmentCloud.second, 0.4, 10, 500); 
+    std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> cloudClusters = ppc.ClusteringMy(segmentCloud.second, 0.5, 10, 500); 
     // 0.4 because it should be a little larger than  filter resolution 
     int clusterId = 0;
     std::vector<Color> colors = {Color(1,0,0), Color(0,1,0), Color(0,0,1)}; // R,G,B
